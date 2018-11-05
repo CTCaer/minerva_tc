@@ -24,8 +24,8 @@
 
 typedef struct 
 {
-	s32 rate_min;
-	s32 rate_dst;
+	s32 pll_osc_in;
+	s32 pll_out;
 	u32 pll_feedback_div;
 	u32 pll_input_div;
 	u32 pll_post_div;

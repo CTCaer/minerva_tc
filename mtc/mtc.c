@@ -35,24 +35,50 @@ void _usleep(u32 microseconds)
 		;
 }
 
-pllm_clk_config_t pllm_clk_config_table[15] =
+/*
+ * REF:  PLL Input reference (OSC_FREQ).
+ * DIVN: PLL feedback divider.
+ * DIVM: PLL input divider.
+ * DIVP: PLL post divider.
+ * PLL_OUT = (REF / DIVM) * DIVN / DIVP
+ * 
+ * DIVP    | DIVP
+ * Encoded | Real
+ * ----------------------
+ * 0       | 1 (DIVP off)
+ * 1       | 2
+ * 2       | 3
+ * 3       | 4
+ * 4       | 5
+ * 5       | 6
+ * 6       | 8
+ * 7       | 10
+ * 8       | 12
+ * 9       | 16
+ * 10      | 12
+ * 11      | 16
+ * 12      | 20
+ * 13      | 24
+ * 14      | 32
+ */
+pllm_clk_config_t pllm_clk_config_table[] =
 {
-	// rate_min, rate_dst, pll_feedback_div, pll_input_div, pll_post_div.
-	{12000, 800000,  0x42, 1, 0},
-	{13000, 800000,  0x3D, 1, 0},
-	{38400, 297600,  0x5D, 4, 2},
-	{38400, 400000,  0x7D, 4, 2},
-	{38400, 408000,  0x55, 4, 1},
-	{38400, 532800,  0x6F, 4, 1},
-	{38400, 665600,  0x68, 3, 1},
-	{38400, 800000,  0x7D, 3, 1},
-	{38400, 931200,  0x61, 4, 0},
-	{38400, 1065600, 0x6F, 4, 0},
-	{38400, 1200000, 0x7D, 4, 0},
-	{38400, 1331200, 0x68, 3, 0},
-	{38400, 1459200, 0x4C, 2, 0},
-	{38400, 1600000, 0x7D, 3, 0},
- 	{0,     0,       0,    0, 0}
+	// pll_osc_in, pll_out, pll_feedback_div, pll_input_div, pll_post_div.
+	{38400, 297600,  93,  4, 2}, // ((38400 / 4) * 93)  / 3
+	{38400, 400000,  125, 4, 2}, // ((38400 / 4) * 125) / 3
+	{38400, 408000,  85,  4, 1}, // ((38400 / 4) * 85)  / 2
+	{38400, 532800,  111, 4, 1}, // ((38400 / 4) * 111) / 2
+	{38400, 665600,  104, 3, 1}, // ((38400 / 3) * 104) / 2
+	{38400, 800000,  125, 3, 1}, // ((38400 / 3) * 125) / 2
+	{38400, 931200,  97,  4, 0}, // (38400 / 4) * 97
+	{38400, 1065600, 111, 4, 0}, // (38400 / 4) * 111
+	{38400, 1200000, 125, 4, 0}, // (38400 / 4) * 125
+	{38400, 1331200, 104, 3, 0}, // (38400 / 3) * 104
+	{38400, 1459200, 76,  2, 0}, // (38400 / 2) * 76
+	{38400, 1600000, 125, 3, 0}, // (38400 / 3) * 125
+	{38400, 1862400, 97,  2, 0}, // (38400 / 2) * 97
+	{38400, 2131200, 111, 2, 0}, // (38400 / 2) * 111
+ 	{0,     0,       0,   0, 0}
 };
 
 u32 burst_regs_emc_addr_table[221] = {
@@ -1002,20 +1028,20 @@ s32 _fceil(float var)
 	return result;
 }
 
-u32 _pllm_clk_base_cfg(s32 rate_KHz, s32 min_rate_KHz, u32 clk_src_emc, s32 emc_2X_clk_src_is_PLLMB)
+u32 _pllm_clk_base_cfg(s32 rate_KHz, s32 pll_ref, u32 clk_src_emc, s32 emc_2X_clk_src_is_PLLMB)
 {
 	u32 dividers = 0;
 	s32 i = 0;
 	pllm_clk_config_t *pllm_clk_config;
 
-	for (i = 0; pllm_clk_config_table[i].rate_min; i++)
+	for (i = 0; pllm_clk_config_table[i].pll_osc_in; i++)
 	{
-		if (pllm_clk_config_table[i].rate_min == min_rate_KHz && pllm_clk_config_table[i].rate_dst == rate_KHz)
+		if (pllm_clk_config_table[i].pll_osc_in == pll_ref && pllm_clk_config_table[i].pll_out == rate_KHz)
 			break;
 	}
 
 	pllm_clk_config = &pllm_clk_config_table[i];
-	if (pllm_clk_config->rate_min)
+	if (pllm_clk_config->pll_osc_in)
 	{
 		dividers = pllm_clk_config->pll_input_div | (pllm_clk_config->pll_feedback_div << 8) | ((pllm_clk_config->pll_post_div & 0x1F) << 20);
 		if (emc_2X_clk_src_is_PLLMB)
