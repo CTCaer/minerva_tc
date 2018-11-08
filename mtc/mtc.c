@@ -3715,7 +3715,7 @@ static void _minerva_train_patterns(emc_table_t *src_emc_entry, emc_table_t *dst
 		_minerva_set_clock(src_emc_entry, dst_emc_entry, 0, selected_clk_src_emc);
 }
 
-u32 _minerva_do_periodic_compensation(emc_table_t *mtc_table_entry)
+u32 minerva_do_periodic_compensation(emc_table_t *mtc_table_entry)
 {
 	if (mtc_table_entry && mtc_table_entry->periodic_training)
 	{
@@ -3856,6 +3856,8 @@ s32 _minerva_set_rate(mtc_config_t *mtc_cfg)
 		_minerva_set_clock(src_emc_entry, dst_emc_entry, 0, selected_clk_src_emc);
 		mtc_cfg->current_emc_table = dst_emc_entry;
 		mtc_cfg->rate_from = dst_emc_entry->rate_khz;
+		if (dst_emc_entry->periodic_training)
+			minerva_do_periodic_compensation(dst_emc_entry);
 		return 0;
 	case OP_TRAIN:
 		_minerva_train_patterns(src_emc_entry, dst_emc_entry, false, selected_clk_src_emc);
@@ -3866,6 +3868,8 @@ s32 _minerva_set_rate(mtc_config_t *mtc_cfg)
 		_minerva_train_patterns(src_emc_entry, dst_emc_entry, true, selected_clk_src_emc);
 		mtc_cfg->current_emc_table = dst_emc_entry;
 		mtc_cfg->rate_from = dst_emc_entry->rate_khz;
+		if (dst_emc_entry->periodic_training)
+			minerva_do_periodic_compensation(dst_emc_entry);
 		return 0;
 	default:
 		return 4;
@@ -3892,14 +3896,14 @@ void minerva_main(mtc_config_t *mtc_cfg)
 		EPRINTF("Training and switching..");
 		break;
 	case OP_PERIODIC_TRAIN:
-		EPRINTF("periodic training..");
+		EPRINTF("Periodic training..");
 		break;
 	}
 
 	if (mtc_cfg->train_mode != OP_PERIODIC_TRAIN)
 		_minerva_set_rate(mtc_cfg);
 	else
-		_minerva_do_periodic_compensation(mtc_cfg->current_emc_table);
+		minerva_do_periodic_compensation(mtc_cfg->current_emc_table);
 
 	mtc_cfg->train_ram_patterns = train_ram_patterns;
 	mtc_cfg->fsp_for_src_freq = fsp_for_src_freq;

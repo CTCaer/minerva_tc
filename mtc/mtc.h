@@ -41,7 +41,10 @@
 #define EMC_CH1(off) _REG(EMC1_BASE, off)
 /* End of addresses and access macros */
 
+#define EMC_TABLE_SIZE_R7         49280
+#define EMC_TABLE_ENTRY_SIZE_R7   4928
 #define EMC_STATUS_UPDATE_TIMEOUT 1000
+#define EMC_PERIODIC_TRAIN_MS     100
 
 typedef struct
 {
@@ -113,6 +116,10 @@ enum DRAM_DEV_NO
 	TWO_RANK = 2
 };
 
+/* Periodic compensation only for tight timings that need it. Run every 100ms. */
+u32  minerva_do_periodic_compensation(emc_table_t *mtc_table_entry);
+
+/* Main function used to access all Minerva functions. */
 void minerva_main(mtc_config_t *mtc_cfg);
 
 #endif
