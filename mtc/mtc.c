@@ -1112,6 +1112,57 @@ static bool _timing_update(s32 dual_channel)
 	return err;
 }
 
+static s32 _get_dram_temperature()
+{
+	s32 mr4_0 = 0;
+	s32 mr4_1 = 0;
+
+	bool channel1_enabled = (EMC(EMC_FBIO_CFG7) >> 2) & 1;
+	u32 emc_cfg_o = EMC(EMC_CFG);
+
+	_wait_emc_status(EMC_EMC_STATUS, MRR_DIVLD, false, EMC_CH0);
+
+	if (emc_cfg_o & 0x20000000)
+	{
+		EMC(EMC_CFG) = emc_cfg_o & 0xDFFFFFFF;
+		_timing_update(channel1_enabled);
+	}
+
+	_request_mmr_data(0x80040000, EMC_CH0);
+	mr4_0 = EMC(EMC_MRR) & 0xFFFF;
+
+	if (mr4_0 < 0xF001)
+		mr4_0 &= 0x7;
+	else
+	{
+		mr4_0 = -1;
+		goto out;
+	}
+
+	if (channel1_enabled)
+	{
+		_request_mmr_data(0x40040000, channel1_enabled);
+		mr4_1 = EMC(EMC_MRR);
+
+		if (mr4_1 < 0xF001)
+			mr4_1 &= 0x7;
+		else
+			goto out;
+
+		if (mr4_1 > mr4_0)
+			mr4_0 = mr4_1;
+	}
+
+out:
+	if (emc_cfg_o & 0x20000000)
+	{
+		EMC(EMC_CFG) = emc_cfg_o;
+		_timing_update(channel1_enabled);
+	}
+
+	return mr4_0;
+}
+
 static u32 _pllm_clk_base_cfg(s32 rate_KHz, u32 clk_src_emc, s32 emc_2X_clk_src_is_PLLMB)
 {
 	u32 dividers = 0;
@@ -3715,6 +3766,59 @@ static void _minerva_train_patterns(emc_table_t *src_emc_entry, emc_table_t *dst
 		_minerva_set_clock(src_emc_entry, dst_emc_entry, 0, selected_clk_src_emc);
 }
 
+void minerva_do_over_temp_compensation(mtc_config_t *mtc_cfg)
+{
+	s32 dram_type = EMC(EMC_FBIO_CFG5) & 3;
+
+	// Only LPDDR chips are supported.
+	if (dram_type != DRAM_TYPE_LPDDR2 && dram_type != DRAM_TYPE_LPDDR4)
+		return;
+
+	s32 dram_temp = _get_dram_temperature();
+
+	if (mtc_cfg->prev_temp == dram_temp || dram_temp < 0)
+		return;
+
+	u32 refr = mtc_cfg->current_emc_table->burst_regs.emc_refresh_idx;
+	u32 pre_refr = mtc_cfg->current_emc_table->burst_regs.emc_pre_refresh_req_cnt_idx;
+	u32 dyn_self_ref = mtc_cfg->current_emc_table->burst_regs.emc_dyn_self_ref_control_idx;
+
+	switch (dram_temp)
+	{
+	// Normal temp (<= 85 oC).
+	case 0:
+	case 1:
+	case 2:
+	case 3:
+		if (mtc_cfg->prev_temp < 4)
+		{
+			mtc_cfg->prev_temp = dram_temp;
+			return;
+		}
+		break;
+	// Over temp (> 85 oC).
+	case 4: // 
+		refr = (refr & 0xFFFF0000) | ((refr & 0xFFFF) >> REFRESH_X2);
+		pre_refr = (pre_refr & 0xFFFF0000) | ((pre_refr & 0xFFFF) >> REFRESH_X2);
+		dyn_self_ref = (dyn_self_ref & 0xFFFF0000) | ((dyn_self_ref & 0xFFFF) >> REFRESH_X2);
+		break;
+	case 5:
+	case 6: // Temp 6 normally needs a derating emc table.
+		refr = (refr & 0xFFFF0000) | ((refr & 0xFFFF) >> REFRESH_X4);
+		pre_refr = (pre_refr & 0xFFFF0000) | ((pre_refr & 0xFFFF) >> REFRESH_X4);
+		dyn_self_ref = (dyn_self_ref & 0xFFFF0000) | ((dyn_self_ref & 0xFFFF) >> REFRESH_X4);
+		break;
+	default:
+		break;
+	}
+
+	mtc_cfg->prev_temp = dram_temp;
+
+	EMC(EMC_REFRESH) = refr;
+	EMC(EMC_PRE_REFRESH_REQ_CNT) = pre_refr;
+	EMC(EMC_DYN_SELF_REF_CONTROL) = dyn_self_ref;
+}
+
 u32 minerva_do_periodic_compensation(emc_table_t *mtc_table_entry)
 {
 	if (mtc_table_entry && mtc_table_entry->periodic_training)
@@ -3888,22 +3992,25 @@ void minerva_main(mtc_config_t *mtc_cfg)
 	{
 	case OP_SWITCH:
 		EPRINTF("Switching..");
+		_minerva_set_rate(mtc_cfg);
 		break;
 	case OP_TRAIN:
 		EPRINTF("Training..");
+		_minerva_set_rate(mtc_cfg);
 		break;
 	case OP_TRAIN_SWITCH:
 		EPRINTF("Training and switching..");
+		_minerva_set_rate(mtc_cfg);
 		break;
 	case OP_PERIODIC_TRAIN:
 		EPRINTF("Periodic training..");
+		minerva_do_periodic_compensation(mtc_cfg->current_emc_table);
+		break;
+	case OP_TEMP_COMP:
+		EPRINTF("Over temperature compensation..");
+		minerva_do_over_temp_compensation(mtc_cfg);
 		break;
 	}
-
-	if (mtc_cfg->train_mode != OP_PERIODIC_TRAIN)
-		_minerva_set_rate(mtc_cfg);
-	else
-		minerva_do_periodic_compensation(mtc_cfg->current_emc_table);
 
 	mtc_cfg->train_ram_patterns = train_ram_patterns;
 	mtc_cfg->fsp_for_src_freq = fsp_for_src_freq;

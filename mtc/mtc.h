@@ -45,6 +45,7 @@
 #define EMC_TABLE_ENTRY_SIZE_R7   4928
 #define EMC_STATUS_UPDATE_TIMEOUT 1000
 #define EMC_PERIODIC_TRAIN_MS     100
+#define EMC_TEMP_COMP_MS          1000
 
 typedef struct
 {
@@ -55,6 +56,7 @@ typedef struct
 	emc_table_t *current_emc_table;
 	u32 train_mode;
 	u32 sdram_id;
+	u32 prev_temp;
 	bool emc_2X_clk_src_is_pllmb;
 	bool fsp_for_src_freq;
 	bool train_ram_patterns;
@@ -65,7 +67,8 @@ enum train_mode_t
 	OP_SWITCH         = 0,
 	OP_TRAIN          = 1,
 	OP_TRAIN_SWITCH   = 2,
-	OP_PERIODIC_TRAIN = 3
+	OP_PERIODIC_TRAIN = 3,
+	OP_TEMP_COMP      = 4
 };
 
 enum comp_seq_t
@@ -116,7 +119,20 @@ enum DRAM_DEV_NO
 	TWO_RANK = 2
 };
 
+enum DRAM_OVER_TEMP_REF
+{
+	REFRESH_X2 = 1,
+	REFRESH_X4 = 2
+};
+
+/* Timers for the below two compensation functions should be paused when changing timings. */
+
+/* Change refresh rate based on dram temps. Run every 1000ms. */
+/* Timer should be run only when another component reports over temperature. */
+void minerva_do_over_temp_compensation(mtc_config_t *mtc_cfg);
+
 /* Periodic compensation only for tight timings that need it. Run every 100ms. */
+/* Over temp and periodic compensation, should not access EMC_MRR at the same time. */
 u32  minerva_do_periodic_compensation(emc_table_t *mtc_table_entry);
 
 /* Main function used to access all Minerva functions. */
