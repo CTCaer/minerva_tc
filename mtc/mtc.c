@@ -1065,22 +1065,21 @@ static bool _wait_emc_status(u32 reg_offset, u32 bit_mask, bool updated_state, s
 		{
 			if (emc_channel != 1)
 				goto done;
+
 			if (((EMC_CH1(reg_offset) & bit_mask) != 0) == updated_state)
 			{
 				err = false;
 				break;
 			}
 		}
-		else
+		else if (((EMC(reg_offset) & bit_mask) != 0) == updated_state)
 		{
-			if (((EMC(reg_offset) & bit_mask) != 0) == updated_state)
-			{
-				err = false;
-				break;
-			}
+			err = false;
+			break;
 		}
 		_usleep(1);
 	}
+
 done:
 	return err;
 }
@@ -1185,18 +1184,21 @@ static u32 _pllm_clk_base_cfg(s32 rate_KHz, u32 clk_src_emc, s32 emc_2X_clk_src_
 		{
 			CLOCK(CLK_RST_CONTROLLER_PLLMB_BASE) = dividers;
 			CLOCK(CLK_RST_CONTROLLER_PLLMB_BASE) |= PLLM_ENABLE;
+
 			if ((clk_src_emc >> EMC_2X_CLK_SRC_SHIFT) == PLLM_UD)
 				clk_src_emc = (clk_src_emc & 0x1FFFFFFF) | (PLLMB_UD << EMC_2X_CLK_SRC_SHIFT);
 			else if (!(clk_src_emc >> EMC_2X_CLK_SRC_SHIFT))
 				clk_src_emc |= (PLLMB_OUT0 << EMC_2X_CLK_SRC_SHIFT);
+
 			while (!(CLOCK(CLK_RST_CONTROLLER_PLLMB_BASE) & PLLM_LOCK))
 				;
 		}
 		else
 		{
 			CLOCK(CLK_RST_CONTROLLER_PLLM_BASE) = dividers;
-			CLOCK(CLK_RST_CONTROLLER_PLLM_MISC2) |= 0x10u; // PLLM_EN_LCKDET.
+			CLOCK(CLK_RST_CONTROLLER_PLLM_MISC2) |= PLLM_EN_LCKDET;
 			CLOCK(CLK_RST_CONTROLLER_PLLM_BASE) |= PLLM_ENABLE;
+
 			if ((clk_src_emc >> EMC_2X_CLK_SRC_SHIFT) == PLLM_UD)
 				clk_src_emc = (clk_src_emc & 0x1FFFFFFF) | (PLLM_UD << EMC_2X_CLK_SRC_SHIFT);
 			while (!(CLOCK(CLK_RST_CONTROLLER_PLLM_BASE) & PLLM_LOCK))
@@ -1211,13 +1213,13 @@ static void _change_dll_src(emc_table_t *mtc_table_entry, u32 clk_src_emc)
 	u32 emc_2x_clk_src = clk_src_emc >> EMC_2X_CLK_SRC_SHIFT;
 
 	u32 dll_setting = ((((mtc_table_entry->dll_clk_src & 0x1FFFFFFF)
-			| (emc_2x_clk_src << EMC_2X_CLK_SRC_SHIFT)) & 0xFFFFFF00)
+		| (emc_2x_clk_src << EMC_2X_CLK_SRC_SHIFT)) & 0xFFFFFF00)
 		| (clk_src_emc & 0xFF)) & 0xFFFFF3FF;
 
 	if (emc_2x_clk_src == PLLMB_UD)
-		dll_setting |= 0x400; // PLLM_VCOB.
+		dll_setting |= EMC_DLL_PLLM_VCOB;
 	else if (emc_2x_clk_src != PLLM_UD)
-		dll_setting |= 0x800; // EMC_DLL_SWITCH_OUT.
+		dll_setting |= EMC_DLL_SWITCH_OUT;
 
 	CLOCK(CLK_RST_CONTROLLER_CLK_SOURCE_EMC_DLL) = dll_setting;
 
@@ -1271,6 +1273,7 @@ static u32 _digital_dll_prelock(emc_table_t *mtc_table_entry, u32 needs_tristate
 		EMC(EMC_DBG) |= 2u;
 		EMC(EMC_CFG_DIG_DLL) &= 0xFFFFFFFE; //Disable CFG_DLL_EN: [PMC] Enable digital DLL.
 		EMC(EMC_DBG) &= 0xFFFFFFFD;
+
 		while (EMC(EMC_CFG_DIG_DLL) & 1)
 			;
 		if (dual_channel)
@@ -1292,10 +1295,8 @@ static void _digital_dll_disable()
 	while (EMC(EMC_CFG_DIG_DLL) & 1)
 		;
 	if (dual_channel)
-	{
 		while (EMC_CH1(EMC_CFG_DIG_DLL) & 1)
 			;
-	}
 }
 
 static void _digital_dll_enable(s32 channel1_enabled)
@@ -1307,10 +1308,8 @@ static void _digital_dll_enable(s32 channel1_enabled)
 	while (!(EMC(EMC_CFG_DIG_DLL) & 1))
 		;
 	if (channel1_enabled)
-	{
 		while (!(EMC_CH1(EMC_CFG_DIG_DLL) & 1))
 			;
-	}
 }
 
 static void _digital_dll_enable_rs(s32 channel1_enabled)
@@ -1322,10 +1321,8 @@ static void _digital_dll_enable_rs(s32 channel1_enabled)
 	while (!(EMC(EMC_CFG_DIG_DLL) & 1))
 		;
 	if (channel1_enabled)
-	{
 		while (!(EMC_CH1(EMC_CFG_DIG_DLL) & 1))
 			;
-	}
 }
 
 static u32 _dvfs_power_ramp_down(bool flip_backward, emc_table_t *src_emc_table_entry, emc_table_t *dst_emc_table_entry, float src_clock_period)
@@ -1354,6 +1351,7 @@ static u32 _dvfs_power_ramp_down(bool flip_backward, emc_table_t *src_emc_table_
 		pmacro_cfg5 = src_emc_table_entry->burst_regs.emc_fbio_cfg5_idx;
 		pmacro_common_tx = src_emc_table_entry->burst_regs.emc_pmacro_common_pad_tx_ctrl_idx;
 	}
+
 	u32 pmacro_cmd_pad_drvforceon = pmacro_cmd_pad | 0x4000000;
 
 	u32 ramp_down_wait = (u32)(float)(src_clock_period * 12.0f);
@@ -1379,8 +1377,10 @@ static u32 _dvfs_power_ramp_down(bool flip_backward, emc_table_t *src_emc_table_
 			_ccfifo_write(EMC_PMACRO_DATA_PAD_TX_CTRL, pmacro_dq_pad, 0);
 			_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xFEEDFEED, 0);
 		}
+
 		ramp_down_wait += 200;
 		_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xFE40FE40, (u32)src_clk_per_pc);
+
 		if (src_clock_period >= 0.416666667) // Iobrick dcc threshold.
 			_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xF800F800, (u32)src_clk_per_pc);
 		else
@@ -1390,10 +1390,9 @@ static u32 _dvfs_power_ramp_down(bool flip_backward, emc_table_t *src_emc_table_
 			_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xF800F800, 0);
 		}
 	}
+
 	if (src_clock_period >= 1.66666667) // Dvfs mid speed threshold.
-	{
 		_ccfifo_write(EMC_PMACRO_COMMON_PAD_TX_CTRL, pmacro_common_tx & 0xFFFFFFF0, (u32)src_clk_per_pc);
-	}
 	else
 	{
 		ramp_down_wait += 400;
@@ -1416,6 +1415,7 @@ static u32 _dvfs_power_ramp_up(bool flip_backward, emc_table_t *src_emc_table_en
 	u32 ramp_up_wait = 0;
 
 	float dst_clk_per_pc = (100.0f / dst_clock_period) + 1.0f;
+
 	if (flip_backward)
 	{
 		pmacro_cmd_pad = src_emc_table_entry->burst_regs.emc_pmacro_cmd_pad_tx_ctrl_idx;
@@ -1456,80 +1456,62 @@ static u32 _dvfs_power_ramp_up(bool flip_backward, emc_table_t *src_emc_table_en
 		pmacro_cfg5 = dst_emc_table_entry->burst_regs.emc_fbio_cfg5_idx;
 		pmacro_common_tx = dst_emc_table_entry->burst_regs.emc_pmacro_common_pad_tx_ctrl_idx;
 	}
+
 	pmacro_cmd_pad_data = (pmacro_cmd_pad & 0xFEFEFDFD) | 0x4000000;
 
 	if (dst_clock_period >= 1.66666667) // Dvfs mid speed threshold.
 	{
 		_ccfifo_write(EMC_PMACRO_COMMON_PAD_TX_CTRL, pmacro_common_tx | 8, 0);
-		if (dst_clock_period >= 1.0) // Dvfs high speed threshold.
+
+		_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 | 0x600, 0);
+		_ccfifo_write(EMC_FBIO_CFG5, pmacro_cfg5 & 0xFFFFFEFF, 12);
+
+		ramp_up_wait = (u32)((float)(dst_clock_period * 12.0f) + 0.0);
+	}
+	else
+	{
+		_ccfifo_write(EMC_PMACRO_COMMON_PAD_TX_CTRL, pmacro_common_tx & 0xA, 0);
+		_ccfifo_write(EMC_PMACRO_COMMON_PAD_TX_CTRL, pmacro_common_tx & 0xF, (u32)dst_clk_per_pc);
+
+		if (dst_clock_period < 1.0) // Dvfs high speed threshold.
 		{
-			if (dst_clock_period >= 1.66666667) // Dvfs mid speed threshold.
-			{
-				_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 | 0x600, 0);
-				_ccfifo_write(EMC_FBIO_CFG5, pmacro_cfg5 & 0xFFFFFEFF, 12);
-				ramp_up_wait = (u32)((float)(dst_clock_period * 12.0f) + 0.0);
-			}
+			if (dst_clock_period >= 0.416666667) // Iobrick dcc threshold.
+				_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xFE40FE40, (u32)dst_clk_per_pc);
 			else
 			{
-				_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 | 0x6000600, (u32)dst_clk_per_pc);
-				_ccfifo_write(EMC_FBIO_CFG5, pmacro_cfg5 & 0xFFFFFEFF, (u32)(float)(dst_clk_per_pc + 9.0f));
-				ramp_up_wait = (u32)(float)(100.0f + (float)(dst_clock_period * 10.0f));
+				pmacro_cmd_pad_data = (pmacro_cmd_pad & 0xFEFEFDFD) | 0x4010200;
+				pmacro_dq_pad = (pmacro_dq_pad & 0xFEFEFDFD) | 0x10200;
+				_ccfifo_write(EMC_PMACRO_CMD_PAD_TX_CTRL, pmacro_cmd_pad_data, (u32)dst_clk_per_pc);
+				_ccfifo_write(EMC_PMACRO_DATA_PAD_TX_CTRL, pmacro_dq_pad, 0);
+				_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xFE40FE40, 0);
 			}
-			_ccfifo_write(EMC_PMACRO_CMD_PAD_TX_CTRL, pmacro_cmd_pad_data & 0xFBFFFFFF, 5);
 
-			return ramp_up_wait;
+			_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xFEEDFEED, (u32)dst_clk_per_pc);
+
+			if (dst_clock_period >= 0.416666667) // Iobrick dcc threshold.
+				_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1, (u32)dst_clk_per_pc);
+			else
+			{
+				pmacro_cmd_pad_data |= 0x1010202u;
+				pmacro_dq_pad |= 0x1010202;
+				_ccfifo_write(EMC_PMACRO_CMD_PAD_TX_CTRL, pmacro_cmd_pad_data, (u32)dst_clk_per_pc);
+				_ccfifo_write(EMC_PMACRO_DATA_PAD_TX_CTRL, pmacro_dq_pad, 0);
+				_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1, 0);
+			}
+
+			_ccfifo_write(EMC_FBIO_CFG5, pmacro_cfg5 & 0xFFFFFEFF, (u32)(float)(dst_clk_per_pc + 9.0f));
+
+			ramp_up_wait = (u32)(float)((float)400 + (float)(100.0f + (float)(dst_clock_period * 10.0f)));
 		}
-
-		_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xFE40FE40, (u32)dst_clk_per_pc);
-		_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xFEEDFEED, (u32)dst_clk_per_pc);
-		_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1, (u32)dst_clk_per_pc);
-		_ccfifo_write(EMC_FBIO_CFG5, pmacro_cfg5 & 0xFFFFFEFF, (u32)(float)(dst_clk_per_pc + 9.0f));
-		ramp_up_wait = (u32)(float)((float)300 + (float)(100.0f + (float)(dst_clock_period * 10.0f)));
-		_ccfifo_write(EMC_PMACRO_CMD_PAD_TX_CTRL, pmacro_cmd_pad_data & 0xFBFFFFFF, 5);
-
-		return ramp_up_wait;
-	}
-	_ccfifo_write(EMC_PMACRO_COMMON_PAD_TX_CTRL, pmacro_common_tx & 0xA, 0);
-	_ccfifo_write(EMC_PMACRO_COMMON_PAD_TX_CTRL, pmacro_common_tx & 0xF, (u32)dst_clk_per_pc);
-
-	if (dst_clock_period < 1.0) // Dvfs high speed threshold.
-	{
-		if (dst_clock_period >= 0.416666667) // Iobrick dcc threshold.
-			_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xFE40FE40, (u32)dst_clk_per_pc);
-		else
+		else // 1.0 > dst_clock_period < 1.66666667.
 		{
-			pmacro_cmd_pad_data = (pmacro_cmd_pad & 0xFEFEFDFD) | 0x4010200;
-			pmacro_dq_pad = (pmacro_dq_pad & 0xFEFEFDFD) | 0x10200;
-			_ccfifo_write(EMC_PMACRO_CMD_PAD_TX_CTRL, pmacro_cmd_pad_data, (u32)dst_clk_per_pc);
-			_ccfifo_write(EMC_PMACRO_DATA_PAD_TX_CTRL, pmacro_dq_pad, 0);
-			_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xFE40FE40, 0);
+			_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 | 0x6000600, (u32)dst_clk_per_pc);
+			_ccfifo_write(EMC_FBIO_CFG5, pmacro_cfg5 & 0xFFFFFEFF, (u32)(float)(dst_clk_per_pc + 9.0f));
+
+			ramp_up_wait = (u32)(float)((float)100 + (float)(100.0f + (float)(dst_clock_period * 10.0f)));
 		}
-
-		_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 & 0xFEEDFEED, (u32)dst_clk_per_pc);
-
-		if (dst_clock_period >= 0.416666667) // Iobrick dcc threshold.
-			_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1, (u32)dst_clk_per_pc);
-		else
-		{
-			pmacro_cmd_pad_data |= 0x1010202u;
-			pmacro_dq_pad |= 0x1010202;
-			_ccfifo_write(EMC_PMACRO_CMD_PAD_TX_CTRL, pmacro_cmd_pad_data, (u32)dst_clk_per_pc);
-			_ccfifo_write(EMC_PMACRO_DATA_PAD_TX_CTRL, pmacro_dq_pad, 0);
-			_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1, 0);
-		}
-
-		_ccfifo_write(EMC_FBIO_CFG5, pmacro_cfg5 & 0xFFFFFEFF, (u32)(float)(dst_clk_per_pc + 9.0f));
-		ramp_up_wait = (u32)(float)((float)400 + (float)(100.0f + (float)(dst_clock_period * 10.0f)));
-		_ccfifo_write(EMC_PMACRO_CMD_PAD_TX_CTRL, pmacro_cmd_pad_data & 0xFBFFFFFF, 5);
-
-		return ramp_up_wait;
 	}
 
-	// 1.0 > dst_clock_period < 1.66666667.
-	_ccfifo_write(EMC_PMACRO_BRICK_CTRL_RFU1, pmacro_rfu1 | 0x6000600, (u32)dst_clk_per_pc);
-	_ccfifo_write(EMC_FBIO_CFG5, pmacro_cfg5 & 0xFFFFFEFF, (u32)(float)(dst_clk_per_pc + 9.0f));
-
-	ramp_up_wait = (u32)(float)((float)100 + (float)(100.0f + (float)(dst_clock_period * 10.0f)));
 	_ccfifo_write(EMC_PMACRO_CMD_PAD_TX_CTRL, pmacro_cmd_pad_data & 0xFBFFFFFF, 5);
 
 	return ramp_up_wait;
@@ -1617,7 +1599,7 @@ static u32 _minerva_update_clock_tree_delay(emc_table_t *src_emc_entry, emc_tabl
 	tdel0_0 = dst_emc_entry->current_dram_clktree_c0d0u0 - (dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c0d0u0_idx / 100);
 	if (tdel0_0 < 0)
 		tdel0_0 = !tdel0_0;
-	if (update_type == TRAINING_UPDATE || (dst_rate_mhz * tdel0_0 << 7) / 1000000 > dst_emc_entry->tree_margin)
+	if (update_type == TRAINING_UPDATE || ((dst_rate_mhz * tdel0_0 << 7) / 1000000) > dst_emc_entry->tree_margin)
 		dst_emc_entry->current_dram_clktree_c0d0u0 = dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c0d0u0_idx / 100;
 
 calc_td0_0:
@@ -1654,11 +1636,11 @@ calc_td0_0:
 		tdel0_1 = !tdel0_1;
 	if (tdel0_1 > tdel0_0)
 		tdel0_0 = tdel0_1;
-	if (update_type == TRAINING_UPDATE || (dst_rate_mhz * tdel0_1 << 7) / 1000000 > dst_emc_entry->tree_margin)
+	if (update_type == TRAINING_UPDATE || ((dst_rate_mhz * tdel0_1 << 7) / 1000000) > dst_emc_entry->tree_margin)
 		dst_emc_entry->current_dram_clktree_c0d0u1 = dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c0d0u1_idx / 100;
 
 calc_td1_0:
-	if (channel1_enabled == 1)
+	if (channel1_enabled)
 	{
 		cval = tval / (2 * temp_ch1_0);
 		switch (update_type)
@@ -1693,7 +1675,7 @@ calc_td1_0:
 			tdel1_0 = !tdel1_0;
 		if (tdel1_0 > tdel0_0)
 			tdel0_0 = tdel1_0;
-		if (update_type == TRAINING_UPDATE || (dst_rate_mhz * tdel1_0 << 7) / 1000000 > dst_emc_entry->tree_margin)
+		if (update_type == TRAINING_UPDATE || ((dst_rate_mhz * tdel1_0 << 7) / 1000000) > dst_emc_entry->tree_margin)
 			dst_emc_entry->current_dram_clktree_c1d0u0 = dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c1d0u0_idx / 100;
 
 calc_td1_1:
@@ -1730,7 +1712,7 @@ calc_td1_1:
 			tdel1_1 = !tdel1_1;
 		if (tdel1_1 > tdel0_0)
 			tdel0_0 = tdel1_1;
-		if (update_type == TRAINING_UPDATE || (dst_rate_mhz * tdel1_1 << 7) / 1000000 > dst_emc_entry->tree_margin)
+		if (update_type == TRAINING_UPDATE || ((dst_rate_mhz * tdel1_1 << 7) / 1000000) > dst_emc_entry->tree_margin)
 			dst_emc_entry->current_dram_clktree_c1d0u1 = dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c1d0u1_idx / 100;
 	}
 
@@ -1743,7 +1725,7 @@ calc_dev2:
 		_request_mmr_data(0x40130000, channel1_enabled); // Dev1 MRR 19.
 		temp_ch0_0 = (EMC(EMC_MRR) & 0xFF) << 8;
 		temp_ch0_1 = EMC(EMC_MRR) & 0xFF00;
-		if (channel1_enabled == 1)
+		if (channel1_enabled)
 		{
 			temp_ch1_0 = (EMC_CH1(EMC_MRR) & 0xFF) << 8;
 			temp_ch1_1 = EMC_CH1(EMC_MRR) & 0xFF00;
@@ -1752,7 +1734,7 @@ calc_dev2:
 		_request_mmr_data(0x40120000, channel1_enabled); // Dev1 MRR 18
 		temp_ch0_0 |= EMC(EMC_MRR) & 0xFF;
 		temp_ch0_1 |= ((EMC(EMC_MRR) & 0xFF00) >> 8);
-		if (channel1_enabled == 1)
+		if (channel1_enabled)
 		{
 			temp_ch1_0 |= EMC_CH1(EMC_MRR) & 0xFF;
 			temp_ch1_1 |= (EMC_CH1(EMC_MRR) & 0xFF00) >> 8;
@@ -1793,7 +1775,7 @@ calc_dev2:
 		tmp_tdel0_0 = !tmp_tdel0_0;
 	if (tmp_tdel0_0 > tdel0_0)
 		tdel0_0 = tmp_tdel0_0;
-	if (update_type == TRAINING_UPDATE || (dst_rate_mhz * tmp_tdel0_0 << 7) / 1000000 > dst_emc_entry->tree_margin)
+	if (update_type == TRAINING_UPDATE || ((dst_rate_mhz * tmp_tdel0_0 << 7) / 1000000) > dst_emc_entry->tree_margin)
 		dst_emc_entry->current_dram_clktree_c0d1u0 = dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c0d1u0_idx / 100;
 
 calc_tmp_td0_1:
@@ -1830,11 +1812,11 @@ calc_tmp_td0_1:
 		tdel0_1 = !tdel0_1;
 	if (tdel0_1 > tdel0_0)
 		tdel0_0 = tdel0_1;
-	if (update_type == TRAINING_UPDATE || (dst_rate_mhz * tdel0_1 << 7) / 1000000 > dst_emc_entry->tree_margin)
+	if (update_type == TRAINING_UPDATE || ((dst_rate_mhz * tdel0_1 << 7) / 1000000) > dst_emc_entry->tree_margin)
 		dst_emc_entry->current_dram_clktree_c0d1u1 = dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c0d1u1_idx / 100;
 
 calc_tmp_td1_0:
-	if (channel1_enabled == 1)
+	if (channel1_enabled)
 	{
 		cval = tval / (2 * temp_ch1_0);
 		switch (update_type)
@@ -1869,7 +1851,7 @@ calc_tmp_td1_0:
 			tdel1_0 = !tdel1_0;
 		if (tdel1_0 > tdel0_0)
 			tdel0_0 = tdel1_0;
-		if (update_type == TRAINING_UPDATE || (dst_rate_mhz * tdel1_0 << 7) / 1000000 > dst_emc_entry->tree_margin)
+		if (update_type == TRAINING_UPDATE || ((dst_rate_mhz * tdel1_0 << 7) / 1000000) > dst_emc_entry->tree_margin)
 			dst_emc_entry->current_dram_clktree_c1d1u0 = dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c1d1u0_idx / 100;
 
 calc_tmp_td1_1:
@@ -1906,7 +1888,7 @@ calc_tmp_td1_1:
 			tdel1_1 = !tdel1_1;
 		if (tdel1_1 > tdel0_0)
 			tdel0_0 = tdel1_1;
-		if (update_type == TRAINING_UPDATE || (dst_rate_mhz * tdel1_1 << 7) / 1000000 > dst_emc_entry->tree_margin)
+		if (update_type == TRAINING_UPDATE || ((dst_rate_mhz * tdel1_1 << 7) / 1000000) > dst_emc_entry->tree_margin)
 			dst_emc_entry->current_dram_clktree_c1d1u1 = dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c1d1u1_idx / 100;
 	}
 
@@ -1959,13 +1941,14 @@ static u32 _minerva_periodic_compensation_handler(emc_table_t *src_emc_entry, em
 			dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c1d1u0_idx = 0;
 			dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c1d1u1_idx = 0;
 
-			for (s32 i = 0; i < dst_emc_entry->ptfv_list.ptfv_dvfs_samples_idx; i++)
+			for (u32 i = 0; i < dst_emc_entry->ptfv_list.ptfv_dvfs_samples_idx; i++)
 			{
 				_start_periodic_compensation();
 				_usleep(delay);
 				_minerva_update_clock_tree_delay(src_emc_entry, dst_emc_entry, dram_dev_num, channel1_enabled, DVFS_PT1);
 			}
 		}
+
 		adel = _minerva_update_clock_tree_delay(src_emc_entry, dst_emc_entry, dram_dev_num, channel1_enabled, DVFS_UPDATE);
 
 		return adel;
@@ -1981,12 +1964,13 @@ static u32 _minerva_periodic_compensation_handler(emc_table_t *src_emc_entry, em
 		dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c1d1u0_idx = 0;
 		dst_emc_entry->ptfv_list.ptfv_dqsosc_movavg_c1d1u1_idx = 0;
 
-		for (s32 i = 0; i < dst_emc_entry->ptfv_list.ptfv_write_samples_idx; i++)
+		for (u32 i = 0; i < dst_emc_entry->ptfv_list.ptfv_write_samples_idx; i++)
 		{
 			_start_periodic_compensation();
 			_usleep(delay);
 			_minerva_update_clock_tree_delay(src_emc_entry, dst_emc_entry, dram_dev_num, channel1_enabled, TRAINING_PT1);
 		}
+
 		adel = _minerva_update_clock_tree_delay(src_emc_entry, dst_emc_entry, dram_dev_num, channel1_enabled, TRAINING_UPDATE);
 
 		return adel;
@@ -2089,7 +2073,8 @@ static u32 _minerva_apply_periodic_compensation_trimmer(emc_table_t *mtc_table_e
 		tree_delta_taps[3] = (tree_delta[3] * (s32)dst_rate_mhz) / 1000000;
 		for (s32 i = 0; i < 4; i++)
 		{
-			if ((tree_delta_taps[i] > mtc_table_entry->tree_margin) || (tree_delta_taps[i] < (-1 * mtc_table_entry->tree_margin))) {
+			if ((tree_delta_taps[i] > mtc_table_entry->tree_margin) || (tree_delta_taps[i] < (-1 * mtc_table_entry->tree_margin)))
+			{
 				new_trim[8 + i * 2] += tree_delta_taps[i];
 				new_trim[8 + i * 2 + 1] += tree_delta_taps[i];
 			}
@@ -2171,6 +2156,7 @@ static bool _check_freq_changed(u32 dst_entry_rate_KHz, u32 dst_entry_clk_src_em
 	u32 src_entry_emc_2X_clk_src_div = src_entry_clk_src_emc & 0xFF;
 	u32 dst_entry_emc_2X_clk_src_div = dst_entry_clk_src_emc & 0xFF;
 	u32 pll_post_divider = 0;
+
 	switch (CLOCK(CLK_RST_CONTROLLER_CLK_SOURCE_EMC) >> EMC_2X_CLK_SRC_SHIFT)
 	{
 		case PLLM_OUT0:
@@ -2184,11 +2170,11 @@ static bool _check_freq_changed(u32 dst_entry_rate_KHz, u32 dst_entry_clk_src_em
 		default:
 			break;
 	}
+
+	// Hang if post div is wrong.
 	if (pll_post_divider > 5)
-	{
 		while (true)
 			;
-	}
 
 	if (src_entry_emc_2X_clk_src <= PLLMB_UD)
 		src_entry_emc_2X_clk_src_div = 0;
@@ -2256,7 +2242,7 @@ static void _save_train_results(emc_table_t *mtc_table_entry, u32 needs_training
 		mtc_table_entry->burst_reg_per_ch.emc0_mrw10_idx = (EMC_CH0(EMC_TRAINING_OPT_CA_VREF) & 0xFFFF) | 0x880C0000;
 		mtc_table_entry->burst_reg_per_ch.emc1_mrw10_idx = (channel1_enabled ? EMC_CH1(EMC_TRAINING_OPT_CA_VREF) & 0xFFFF : 0) | 0x880C0000;
 
-		u32 mrw11_dev_selectn = 0;
+		u32 mrw11_dev_selectn;
 		if (dram_dev_num == TWO_RANK)
 			mrw11_dev_selectn = 0x480C0000;
 		else
@@ -2686,18 +2672,18 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 		{
 			_wait_emc_status(EMC_EMC_STATUS, IN_POWERDOWN_MASK, false, EMC_CH0);
 			if (channel1_enabled)
-				_wait_emc_status(EMC_EMC_STATUS, IN_POWERDOWN_MASK, false, channel1_enabled);
+				_wait_emc_status(EMC_EMC_STATUS, IN_POWERDOWN_MASK, false, EMC_CH1);
 		}
 		else
 		{
 			_wait_emc_status(EMC_EMC_STATUS, 0x10, false, EMC_CH0);
 			if (channel1_enabled)
-				_wait_emc_status(EMC_EMC_STATUS, 0x10, false, channel1_enabled);
+				_wait_emc_status(EMC_EMC_STATUS, 0x10, false, EMC_CH1);
 		}
 
 		_wait_emc_status(EMC_EMC_STATUS, IN_SELF_REFRESH_MASK, false, EMC_CH0);
 		if (channel1_enabled)
-			_wait_emc_status(EMC_EMC_STATUS, IN_SELF_REFRESH_MASK, false, channel1_enabled);
+			_wait_emc_status(EMC_EMC_STATUS, IN_SELF_REFRESH_MASK, false, EMC_CH1);
 
 		// Reset clock tree delays.
 		dst_emc_entry->current_dram_clktree_c0d0u0 = dst_emc_entry->trained_dram_clktree_c0d0u0;
@@ -2743,17 +2729,16 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 		EMC(EMC_PMACRO_DATA_PAD_TX_CTRL) =
 			(((dst_emc_entry->burst_regs.emc_pmacro_data_pad_tx_ctrl_idx & 1) | (src_emc_entry->burst_regs.emc_pmacro_data_pad_tx_ctrl_idx & 0xFFFFFFFE)) & 0xFFFFFEFF)
 			| (((dst_emc_entry->burst_regs.emc_pmacro_data_pad_tx_ctrl_idx >> 8) & 0x1) << 8);
-		_usleep(1);
 	}
-	else if (bg_regulator_mode_change)
-		_usleep(1);
+	
+	_usleep(1);
 
 	EMC(EMC_DBG) = emc_dbg_o;
 
 	// Step 2 - Prelock the DLL.
 	EPRINTF("Step 2");
 	if (dst_emc_entry->burst_regs.emc_cfg_dig_dll_idx & 1)
-		_digital_dll_prelock(dst_emc_entry, needs_tristate_training, selected_clk_src_emc); //Prelock enabled for target frequency.
+		_digital_dll_prelock(dst_emc_entry, needs_tristate_training, selected_clk_src_emc); // Prelock enabled for target frequency.
 	else
 	{
 		_change_dll_src(dst_emc_entry, selected_clk_src_emc);
@@ -2885,7 +2870,7 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 
 	// Step 7.2 - Program FSP reference registers and send MRWs to new FSPWR.
 	EPRINTF("Step 7.2");
-	mr13_catr_enable = 0;
+	mr13_catr_enable;
 	if (fsp_for_src_freq)
 	{
 		mr13_flip_fspop = dst_emc_entry->emc_mrw3 | 0xC0;
@@ -2897,25 +2882,20 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 		mr13_flip_fspwr = mr13_flip_fspop | 0x80;
 	}
 
-	if (needs_ca_or_cavref_training && dram_dev_num == TWO_RANK)
-	{
-		if (needs_swap_rank_training)
-		{
-			mr13_flip_fspop = (mr13_flip_fspop & 0x3FFFFFFF) | 0x80000000;
-			mr13_catr_enable = (mr13_flip_fspwr & 0x3FFFFFFF)| 0x40000001;
-		}
-		else
-		{
-			mr13_flip_fspop = (mr13_flip_fspop & 0x3FFFFFFF) | 0x40000000;
-			mr13_catr_enable = (mr13_flip_fspwr & 0x3FFFFFFF) | 0x80000001;
-		}
-	}
-	else if (dram_dev_num == TWO_RANK)
+	if (dram_dev_num == TWO_RANK)
 	{
 		if (needs_swap_rank_training)
 			mr13_catr_enable = (mr13_flip_fspwr & 0x3FFFFFFF) | 0x40000001;
 		else
 			mr13_catr_enable = (mr13_flip_fspwr & 0x3FFFFFFF) | 0x80000001;
+
+		if (needs_ca_or_cavref_training)
+		{
+			if (needs_swap_rank_training)
+				mr13_flip_fspop = (mr13_flip_fspop & 0x3FFFFFFF) | 0x80000000;
+			else
+				mr13_flip_fspop = (mr13_flip_fspop & 0x3FFFFFFF) | 0x40000000;
+		}
 	}
 	else
 		mr13_catr_enable = mr13_flip_fspwr | 1;
@@ -3141,15 +3121,20 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 		EMC(EMC_DBG) = emc_dbg_o | 0x40000002;
 		EMC(EMC_ZCAL_INTERVAL) = src_emc_entry->burst_regs.emc_zcal_interval_idx & 0xFF000000;
 		EMC(EMC_DBG) = emc_dbg_o;
+
 		if (needs_tristate_training)
 		{
 			EMC(EMC_DBG) = emc_dbg_o | 2;
 			EMC(EMC_PMACRO_AUTOCAL_CFG_COMMON) = dst_emc_entry->burst_regs.emc_pmacro_autocal_cfg_common_idx | 0x10000;
+
 			if (needs_ca_or_cavref_training)
 				EMC(EMC_FBIO_CFG5) = src_emc_entry->burst_regs.emc_fbio_cfg5_idx | 0x8000000;
+
 			EMC(EMC_DBG) = emc_dbg_o;
+
 			if (channel1_enabled)
 				_ccfifo_write(EMC_CFG_SYNC, 0, 0);
+
 			_ccfifo_write(EMC_DBG, (emc_dbg_o & 0xF3FFFFFF) | 0x4000000, 0);
 		}
 	}
@@ -3174,12 +3159,14 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 			_ccfifo_write(EMC_MRW7, (src_emc_entry->burst_regs.emc_mrw7_idx & 0xC0C0) | (dst_emc_entry->burst_regs.emc_mrw7_idx & 0xFFFF3F3F), 0); 
 			_ccfifo_write(EMC_MRW15, (src_emc_entry->burst_regs.emc_mrw15_idx & 0x3838) | (dst_emc_entry->burst_regs.emc_mrw15_idx & 0xFFFF0707), 0); 
 		}
+
 		if (opt_zcal_en_cc)
 		{
 			if (dram_dev_num == ONE_RANK || zcal_resistor_shared)
 				emc_zq_cal = 0x80000001;
 			else
 				emc_zq_cal = 1;
+
 			_ccfifo_write(EMC_ZQ_CAL, emc_zq_cal, 0);
 		}
 	}
@@ -3197,9 +3184,11 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 			emc_dbg_val = (emc_dbg_o & 0xF3FFFFFF) | 0x44000000;
 			_ccfifo_write(EMC_DBG, emc_dbg_val, 0);
 		}
+
 		if (needs_ca_or_cavref_training)
 		{
 			_ccfifo_write(EMC_PMACRO_DATA_RX_TERM_MODE, src_emc_entry->burst_regs.emc_pmacro_data_rx_term_mode_idx & 0xFFFFFCCC, 0);
+
 			if (dram_dev_num == TWO_RANK && needs_swap_rank_training)
 			{
 				_ccfifo_write(EMC_MRW3, mr13_flip_fspop | 8, (u32)tRP_src_timing);
@@ -3216,6 +3205,7 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 			_ccfifo_write(EMC_MRW3, mr13_flip_fspop | 8, (u32)tRP_src_timing);
 			ref_delay = (u32)(float)((float)tFC_lpddr4 / src_clock_period);
 		}
+
 		_ccfifo_write(EMC_INTSTATUS, 0, ref_delay);
 		_ccfifo_write(EMC_PIN, emc_pin_o & 0xFFFFFFF8, 30);
 	}
@@ -3230,8 +3220,10 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 	ref_delay = 0;
 	if (dram_type != DRAM_TYPE_LPDDR4)
 		ref_delay = (u32)(float)(tRP_src_timing + tRFC_src_timing + 20.0f);
+
 	_ccfifo_write(EMC_CFG_SYNC, 0, ref_delay);
 	_ccfifo_write(EMC_DBG, emc_dbg_val | 0x40000002, 0); // WRITE_MUX_ACTIVE | WRITE_ACTIVE_ONLY
+
 	ramp_down_wait = _dvfs_power_ramp_down(false, src_emc_entry, dst_emc_entry, src_clock_period);
 
 	// Step 12 - Trigger clock change.
@@ -3243,6 +3235,7 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 	// Step 13 - Ramp up.
 	EPRINTF("Step 13");
 	ramp_up_wait = _dvfs_power_ramp_up(false, src_emc_entry, dst_emc_entry, needs_training & 0xFF, dst_clock_period);
+
 	_ccfifo_write(EMC_DBG, emc_dbg_val, 0);
 
 	// Step 14 - Bringup CKE pins.
@@ -3310,17 +3303,22 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 					T_PDEX_timing_final = 0;
 				_ccfifo_write(EMC_ZQ_CAL, 0x80000001, T_PDEX_timing_final);
 			}
+
 			T_PDEX_timing_final = zq_latch_dvfs_wait_time + T_PDEX_timing;
+
 			if ((zq_latch_dvfs_wait_time + T_PDEX_timing) < 0)
 				T_PDEX_timing_final = 0;
+
 			_ccfifo_write(EMC_ZQ_CAL, 0x80000002, T_PDEX_timing_final);
 			_ccfifo_write(EMC_ZQ_CAL, 0x40000001, 0);
+
 			if (!needs_tristate_training)
 			{
 				_ccfifo_write(EMC_MRW3, (mr13_flip_fspop & 0xF3FFFFF7) | 0xC000000, 0);
 				_ccfifo_write(EMC_SELF_REF, 0x100, 0);
 				_ccfifo_write(EMC_REF, 0, 0);
 			}
+
 			emc_zq_cal = 0x40000002;
 			zq_latch_dvfs_wait_time = (s32)(float)(1000.0f / dst_clock_period);
 		}
@@ -3331,17 +3329,20 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 
 			if (src_clock_period > 2.0)
 				_ccfifo_write(EMC_ZQ_CAL, 1, T_PDEX_timing);
+
 			if (!needs_tristate_training)
 			{
 				_ccfifo_write(EMC_MRW3, (mr13_flip_fspop & 0xF3FFFFF7) | 0xC000000, T_PDEX_timing);
 				_ccfifo_write(EMC_SELF_REF, 0x100, 0);
 				_ccfifo_write(EMC_REF, 0, 0);
 			}
+
 			emc_zq_cal = 2;
 
 			if (zq_latch_dvfs_wait_time < 0)
 				zq_latch_dvfs_wait_time = 0;
 		}
+
 		_ccfifo_write(EMC_ZQ_CAL, emc_zq_cal, (u32)zq_latch_dvfs_wait_time);
 	}
 	
@@ -3419,6 +3420,7 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 			_ccfifo_write(EMC_INTSTATUS, 0, (u32)(float)(1000.0f / src_clock_period));
 			_ccfifo_write(EMC_PMACRO_DATA_RX_TERM_MODE, src_emc_entry->burst_regs.emc_pmacro_data_rx_term_mode_idx, 0);
 		}
+
 		_ccfifo_write(EMC_DBG, emc_dbg_o, 0);
 
 		if (opt_zcal_en_cc)
@@ -3482,13 +3484,6 @@ s32 _minerva_set_clock(emc_table_t *src_emc_entry, emc_table_t *dst_emc_entry, u
 					if (dram_dev_num == TWO_RANK)
 						_ccfifo_write(EMC_ZQ_CAL, 0x40000001, 0);
 				}
-			}
-
-			if (dram_type == DRAM_TYPE_LPDDR2 && opt_zcal_en_cc)
-			{
-				_ccfifo_write(EMC_MRW, 0x880A0056, 0);
-				if (dram_dev_num == TWO_RANK)
-					_ccfifo_write(EMC_MRW, 0x480A0056, 0);
 			}
 
 			goto step_19_2;
@@ -3561,8 +3556,10 @@ step_19_2:
 	EPRINTF("Step 22");
 	if (needs_tristate_training && dram_type == DRAM_TYPE_LPDDR4)
 		_ccfifo_write(EMC_SEL_DPD_CTRL, src_emc_entry->emc_sel_dpd_ctrl, 0);
+
 	_ccfifo_write(EMC_DBG, emc_dbg_o, 0);
 	_ccfifo_write(EMC_CFG_PIPE_CLK, emc_cfg_pipe_clk_o, 0);
+
 	if (bg_regulator_mode_change)
 	{
 		if (enable_bg_regulator)
@@ -3581,6 +3578,7 @@ step_19_2:
 	EMC(EMC_CFG_DIG_DLL) = (EMC(EMC_CFG_DIG_DLL) & 0xFFFFFF24) | 0x88;
 	
 	CLOCK(CLK_RST_CONTROLLER_CLK_SOURCE_EMC) = selected_clk_src_emc;
+
 	if (_wait_emc_status(EMC_INTSTATUS, CLKCHANGE_COMPLETE_INT, true, 0))
 		return 4; // Clkchange handshake timeout error.
 
@@ -3913,12 +3911,15 @@ s32 _minerva_set_rate(mtc_config_t *mtc_cfg)
 		if (mtc_cfg->rate_to == table_entry_rate)
 			dst_emc_entry_idx = i;
 	}
+
 	src_emc_entry = (emc_table_t *)&mtc_cfg->mtc_table[src_emc_entry_idx];
 	dst_emc_entry = (emc_table_t *)&mtc_cfg->mtc_table[dst_emc_entry_idx];
+
 	s32 src_rate_khz = src_emc_entry->rate_khz;
 	s32 dst_rate_khz = dst_emc_entry->rate_khz;
 	u32 src_clk_src_emc = src_emc_entry->clk_src_emc;
 	u32 dst_clk_src_emc = dst_emc_entry->clk_src_emc;
+
 	if (mtc_cfg->table_entries > 900)
 		return 4;
 
