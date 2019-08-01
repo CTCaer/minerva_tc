@@ -29,6 +29,7 @@ bool emc_2X_clk_src_is_pllmb;
 bool fsp_for_src_freq;
 bool train_ram_patterns;
 
+#define VERSION "1.2"
 #define MINERVA_USE_INT 0
 
 /*
